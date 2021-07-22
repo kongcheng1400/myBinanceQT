@@ -7,4 +7,7 @@ import org.knowm.xchange.binance.BinanceExchange;
 
 public class MyBinanceEx {
     Exchange exchange = ExchangeFactory.INSTANCE.createExchange(BinanceExchange.class);
+    static {
+        System.out.println("Hello, Git!");
+    }
 }
