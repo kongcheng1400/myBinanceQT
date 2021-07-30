@@ -7,6 +7,6 @@ public class TaskCleanOrders implements Runnable{
     }
     @Override
     public void run() {
-        exen.cancellOrder();
+        //exen.cancellOrder();
     }
 }

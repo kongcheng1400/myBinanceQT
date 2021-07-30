@@ -8,6 +8,6 @@ public class TaskBalancePosition implements Runnable{
 
     @Override
     public void run() {
-        exen.binancePosition();
+        //exen.binancePosition();
     }
 }

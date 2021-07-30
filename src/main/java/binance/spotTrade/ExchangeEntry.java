@@ -7,11 +7,20 @@ import org.knowm.xchange.binance.dto.meta.BinanceSystemStatus;
 import org.knowm.xchange.binance.service.BinanceAccountService;
 import org.knowm.xchange.binance.service.BinanceMarketDataService;
 import org.knowm.xchange.binance.service.BinanceTradeService;
+import org.knowm.xchange.currency.Currency;
 import org.knowm.xchange.currency.CurrencyPair;
+import org.knowm.xchange.dto.Order;
+import org.knowm.xchange.dto.account.AccountInfo;
 import org.knowm.xchange.dto.marketdata.OrderBook;
+import org.knowm.xchange.dto.marketdata.Ticker;
+import org.knowm.xchange.dto.marketdata.Trade;
+import org.knowm.xchange.dto.marketdata.Trades;
+import org.knowm.xchange.dto.trade.LimitOrder;
 import org.knowm.xchange.service.marketdata.MarketDataService;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -31,69 +40,103 @@ public class ExchangeEntry {
         this.tradeService = (BinanceTradeService) bex.getTradeService();
     }
 
-    public boolean getExchangeStatus() throws IOException {
-        BinanceSystemStatus status = marketDataService.getSystemStatus();
-
-        if (Integer.valueOf(status.getStatus()) == 0) {
-            log.info("System status is fine, message from Binance: " + status.getMsg());
-            return true;
+    public boolean getExchangeStatus()  {
+        try {
+            BinanceSystemStatus status = marketDataService.getSystemStatus();
+            if (Integer.valueOf(status.getStatus()) == 0) {
+                log.info("System status is fine, message from Binance: " + status.getMsg());
+                return true;
+            }
+            else {
+                log.info("System status is abnormal, message from Binance: " + status.getMsg());
+                return false;
+            }
+        } catch (IOException e) {
+            log.warn("getSystemStatus Error.");
+            e.printStackTrace();
         }
-        else {
-            log.info("System status is abnormal, message from Binance: " + status.getMsg());
-            return false;
-        }
+        log.warn("Checking binance system status error!");
+        return false;
     }
 
-    public OrderBook getOrderbook(CurrencyPair cp, Integer limit) throws IOException {
+    public OrderBook getOrderbook(CurrencyPair cp, Integer limit)  {
         lock.lock();
         try {
             return marketDataService.getOrderBook(cp, limit);
+        } catch (IOException e) {
+            log.warn("retrieve orderbook failed.");
+            e.printStackTrace();
         } finally {
             lock.unlock();
         }
+        return null;
     }
 
-    public void getPrice(CurrencyPair cp)
+    public List<Trade> getTrades_limit(CurrencyPair cp, Integer limit) {
+        lock.lock();
+        try {
+            //retrieve the 5 latest trade
+            //Trades trades_5 = exchange.getMarketDataService().getTrades(cp,null, null, null,5 );
+            return marketDataService.getTrades(cp,null, null, null,5).getTrades();
+
+        } catch (IOException e) {
+            log.warn("retrieve trades failed");
+            e.printStackTrace();
+        } finally {
+            lock.unlock();
+        }
+        return null;
+    }
+
+    public ArrayList<Double> getAvailableAsset(CurrencyPair cp) {
+        lock.lock();
+        try {
+            AccountInfo myAcc = bex.getAccountService().getAccountInfo();
+            double cpBase = myAcc.getWallet().getBalance(cp.base).getAvailable().doubleValue();
+            double cpCounter = myAcc.getWallet().getBalance(cp.counter).getAvailable().doubleValue();
+            ArrayList<Double> myArr = new ArrayList<>();
+            myArr.add(cpBase);
+            myArr.add(cpCounter);
+
+            return myArr;
+
+        } catch (IOException e) {
+            log.warn("get my Asset failed");
+            e.printStackTrace();
+        } finally {
+            lock.unlock();
+        }
+        return null;
+    }
+
+    public String placeNewOrder(LimitOrder limitOrder)
     {
         lock.lock();
         try {
-            marketDataService.getTicker(cp);
-            System.out.println(exName + " get price.");
+            return tradeService.placeLimitOrder(limitOrder);
+        } catch (IOException e) {
+            log.warn("get my Asset failed");
+            e.printStackTrace();
+        } finally {
+            lock.unlock();
+        }
+
+        return null;
+
+    }
+
+
+
+    public Ticker getPrice(CurrencyPair cp)
+    {
+        lock.lock();
+        try {
+            return marketDataService.getTicker(cp);
         } catch (IOException e) {
             e.printStackTrace();
         } finally {
             lock.unlock();
         }
-    }
-
-
-    public void trade()
-    {
-        lock.lock();
-        try {
-            System.out.println(exName + " issue trade.");
-        } finally {
-            lock.unlock();
-        }
-    }
-
-    public void cancellOrder()
-    {
-        lock.lock();
-        try {
-            System.out.println(exName + " cancell Orders.");
-        } finally {
-            lock.unlock();
-        }
-    }
-
-    public void binancePosition()
-    {
-        lock.lock();
-        try {
-            System.out.println(exName + " balancing positions");
-        } finally {
-            lock.unlock();
-        }
+        return null;
     }
 }
