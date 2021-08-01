@@ -7,9 +7,7 @@ import org.knowm.xchange.dto.marketdata.OrderBook;
 import org.knowm.xchange.dto.marketdata.Trade;
 import org.knowm.xchange.dto.trade.LimitOrder;
 
-import java.io.IOException;
 import java.math.BigDecimal;
-import java.text.DateFormat;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -17,12 +15,13 @@ import java.util.stream.Collectors;
 public class TaskSpotTrade implements Runnable{
     static final int MaxQLength = 16;
     static final int MinQLength = 8;
-    static final double PositionPct = 0.5;
+    //static final double BurstThresholdPct = 0.0005;
     static final double BurstThresholdPct = 0.0005;
+    static final double TradingFeeRate = 0.00075;
 
-    private ExchangeEntry exen;
-    private CurrencyPair cp;
-    private Integer orderbookDepth = 5;
+    private final ExchangeEntry exen;
+    private final CurrencyPair cp;
+    private final Integer orderbookDepth;
     boolean bull = false;
     boolean bear = false;
     Queue<BigDecimal> tickerQ = new LinkedList<>();
@@ -31,27 +30,49 @@ public class TaskSpotTrade implements Runnable{
     private double buyAt = 0.0;
     private double sellAt = 0.0;
 
+
+    double myInitialAssets;
     double myNetAssets = 0.0;
+    MyAccount myAcc;
+    int sellTimes = 0;
+    int buyTimes = 0;
+    int totalTradingTimes = 0;
+    double totalSell = 0;
+    double totalBuy = 0;
+    double totalTradingFees = 0;
+    double totalTradingAmount = 0;
+
 
     public TaskSpotTrade(ExchangeEntry exen, CurrencyPair cp, Integer depth) {
         this.exen = exen;
         this.cp = cp;
         this.orderbookDepth = depth;
-        myNetAssets = getNetAssets();
-        log.info("at the beginning of trade, the initial net assets:{}", myNetAssets);
+        myAcc = new MyAccount(1000, 0.3);
+        myInitialAssets = myAcc.getBase() * exen.getPrice(cp).getLast().doubleValue() + myAcc.getCounter();
+        log.info("at the beginning of simulation,My Net assets:{}, {} {},{} {}", myInitialAssets,
+                String.format("%.3f", myAcc.getBase()),
+                cp.base,
+                String.format("%.3f", myAcc.getCounter()),
+                cp.counter
+                );
     }
 
-    private double getNetAssets() {
-        List<Double> assetList = exen.getAvailableAsset(cp);
-        if (assetList != null) {
 
-            myNetAssets = assetList.get(0) * exen.getPrice(cp).getLast().doubleValue() + assetList.get(1);
-            log.info("Net assets: {}USDT; {}:{}, {}:{}", myNetAssets,
-                    cp.base.toString(), assetList.get(0),
-                    cp.counter.toString(), assetList.get(1));
-            return  myNetAssets;
-        }
-        return 0;
+    private void tradingSummary() {
+        myNetAssets = myAcc.getBase() * latestTickerPrice + myAcc.getCounter();
+        log.info("total Assets:{} {}, {}:{}, {}:{}, profits={}, Fees={}",
+                String.format("%.4f",myNetAssets), cp.counter,
+                cp.base, String.format("%.4f",myAcc.getBase()),
+                cp.counter, String.format("%.4f",myAcc.getCounter()),
+                String.format("%.4f",myNetAssets - myInitialAssets),
+                String.format("%.4f",totalTradingFees)
+        );
+        log.info("total trading {} times, buy {} times, sell {} times, total buy {} {}, total sell {} {}, total trading:{} {}, fees:{}",
+                totalTradingTimes, buyTimes, sellTimes,
+                String.format("%.3f",totalBuy), cp.base, String.format("%.3f",totalSell), cp.base,
+                String.format("%.3f", totalTradingAmount),cp.counter,
+                String.format("%.3f",totalTradingFees)
+                );
     }
 
     //try to smooth the trades: using the 5last trading amount as the reference.
@@ -73,10 +94,10 @@ public class TaskSpotTrade implements Runnable{
                 tradesAmount.poll();
             else {
                 tradesAmount.offer(Double.valueOf(String.format("%.4f", amount)));
-                log.info("updating trades q: lastest is {}", amount);
+                //log.info("updating trades q: lastest is {}", amount);
             }
             List<String> strList = tradesAmount.stream().map(t->String.format("%.3f  ", t)).collect(Collectors.toList());
-            log.info("after trades updates: "+ strList.toString());
+            log.info("after trades updates: "+ strList);
         }
     }
 
@@ -94,9 +115,9 @@ public class TaskSpotTrade implements Runnable{
                 log.info("bid price = {}, askPrice = {}", bidPrice, askPrice);
 
                 //optimise price
-                buyAt = Double.valueOf(String.format("%.2f", askPrice.doubleValue() * 0.618 + bidPrice.doubleValue() * 0.382 + 0.01));
-                sellAt = Double.valueOf(String.format("%.2f", askPrice.doubleValue() * 0.382 + bidPrice.doubleValue() * 0.618 - 0.01));
-                log.info("updating Orderbook, buy at {}, sell at {}", String.format("%9.3f", buyAt), String.format("%9.2f", sellAt));
+                buyAt = Double.parseDouble(String.format("%.3f", askPrice.doubleValue() * 0.618 + bidPrice.doubleValue() * 0.382 ));
+                sellAt = Double.parseDouble(String.format("%.3f", askPrice.doubleValue() * 0.382 + bidPrice.doubleValue() * 0.618 ));
+                log.info("updating Orderbook, buy at {}, sell at {}", String.format("%.3f", buyAt), String.format("%.2f", sellAt));
             }
 
     }
@@ -107,15 +128,6 @@ public class TaskSpotTrade implements Runnable{
             //calculate the order price.
             //
         if (ob != null) {
-            BigDecimal bidPrice;
-            BigDecimal askPrice;
-            bidPrice = ob.getBids().get(0).getLimitPrice();
-            askPrice = ob.getAsks().get(0).getLimitPrice();
-
-            //optical
-
-            buyAt = askPrice.doubleValue() * 0.618 + bidPrice.doubleValue() * 0.382 + 0.01;
-            sellAt = askPrice.doubleValue() * 0.382 + bidPrice.doubleValue() * 0.618 - 0.01;
 
             //tickerPrice
             double a1, a2, a3, b1, b2, b3;
@@ -149,7 +161,7 @@ public class TaskSpotTrade implements Runnable{
             //log.info("update ticker queue with value of {}", String.format("%.3f",latestTickerPrice));
 
             List<String> strList = tickerQ.stream().map(t->String.format("%.3f ", t.doubleValue())).collect(Collectors.toList());
-            log.info("now ticker queue is : " + strList.toString());
+            log.info("now ticker queue is : " + strList);
         }
     }
 
@@ -177,18 +189,13 @@ public class TaskSpotTrade implements Runnable{
                     String.format("%.3f",latestPrice));
 
 
-            if (len > 2 && ((latestPrice - max1 > burstPrice) ||
-                    ((latestPrice - max2) > burstPrice && tickerArray.get(len - 1).doubleValue() > tickerArray.get(len - 2).doubleValue())))
-                bull = true;
-            else
-                bull = false;
+            bull = (latestPrice - max1 > burstPrice) ||
+                    ((latestPrice - max2) > burstPrice && tickerArray.get(len - 1).doubleValue() > tickerArray.get(len - 2).doubleValue());
 
-            if (len > 2 && ((latestPrice - min1 < burstPrice * -1) ||
-                    ((latestPrice - min2) < burstPrice * -1 && tickerArray.get(len - 1).doubleValue() < tickerArray.get(len - 2).doubleValue()))
-            )
-                bear = true;
-            else
-                bear = false;
+            bear = (latestPrice - min1 < burstPrice * -1) ||
+                    ((latestPrice - min2) < burstPrice * -1 && tickerArray.get(len - 1).doubleValue() < tickerArray.get(len - 2).doubleValue());
+
+
         }
 
         log.info("bull = {}, bear = {}", bull, bear);
@@ -206,25 +213,14 @@ public class TaskSpotTrade implements Runnable{
         updateTrades();
         updateTickerQueue();
         calculateBullBear();
-        List<Double> assetList = null;
-        if (bull == true || bear == true) {
-            assetList = exen.getAvailableAsset(cp);
+        List<Double> assetList;
+        if (bull || bear) {
+            assetList = myAcc.getAssetList();
             if (assetList != null) {
-                log.info("in SpotTrade, time:{} -- asset {}: {}, asset {}: {}",
-                        DateFormat.getDateTimeInstance().format(Calendar.getInstance().getTime()),
-                        cp.base.toString(),
-                        String.format("%.4f", assetList.get(0)),
-                        cp.counter.toString(),
-                        String.format("%.4f", assetList.get(1))
-                );
 
                 double amount = tradesAmount.stream().toList().get(tradesAmount.size() - 1);
                 if (bull) {
-                    double toBuy = Double.valueOf(String.format("%.3f", assetList.get(1) / latestTickerPrice));
-                    log.info("TaskSpotTrade: to buy {} at {} with {}",
-                            cp.base.toString(),
-                            String.format("%4.4f", buyAt),
-                            String.format("%4.4f", amount));
+                    double toBuy = Double.parseDouble(String.format("%.3f", assetList.get(1) / latestTickerPrice));
                     while (toBuy > 0.2) {
                         updateOrderBook();
                         LimitOrder limitOrder;
@@ -236,26 +232,30 @@ public class TaskSpotTrade implements Runnable{
                             limitOrder = new LimitOrder(Order.OrderType.BID, new BigDecimal(String.format("%.3f", amount-0.01)), cp, null, null,
                                     BigDecimal.valueOf(buyAt));
                         }
-                        //exen.placeNewOrder(limitOrder);
                         toBuy -= amount;
 
                         //for simulation:
-                        double bought = 0.0;
-                        double tradingFee = 0.0;
+                        double bought;
+                        double tradingFee;
                         bought = limitOrder.getOriginalAmount().doubleValue() * limitOrder.getLimitPrice().doubleValue();
-                        tradingFee = 0.003*bought;
-
+                        tradingFee = TradingFeeRate * bought;
+                        myAcc.setBase(myAcc.getBase() + limitOrder.getOriginalAmount().doubleValue());
+                        myAcc.setCounter(myAcc.getCounter() - tradingFee - bought);
+                        totalTradingTimes += 1;
+                        buyTimes+=1;
+                        totalTradingFees += tradingFee;
+                        totalTradingAmount += bought;
+                        totalBuy += limitOrder.getOriginalAmount().doubleValue();
+                        log.info("TaskSpotTrade LimitOrder:  buy {} {} at {}",
+                                String.format("%.3f", limitOrder.getOriginalAmount().doubleValue()),
+                                cp.base.toString(),
+                                String.format("%.3f", limitOrder.getLimitPrice().doubleValue()));
                     }
                 }
 
                 if (bear) {
                     double toSell = assetList.get(0) * 0.9;
                     double shortThreshhold = 0.1 * (toSell + assetList.get(1)/latestTickerPrice);
-                    log.info("TaskSpotTrade: to sell {} at {} with {}",
-                            cp.base.toString(),
-                            String.format("%4.4f", sellAt),
-                            String.format("%4.4f", toSell));
-
                     while (toSell > shortThreshhold) {
                         updateOrderBook();
                         LimitOrder limitOrder;
@@ -265,14 +265,27 @@ public class TaskSpotTrade implements Runnable{
                         } else
                             limitOrder = new LimitOrder(Order.OrderType.ASK, new BigDecimal(String.format("%.3f",amount-0.01)), cp, null, null,
                                     BigDecimal.valueOf(sellAt));
+                        toSell -= amount;
 
-                        //exen.placeNewOrder(limitOrder);
-
+                        //for simulation:
+                        double sought = limitOrder.getOriginalAmount().doubleValue() * limitOrder.getLimitPrice().doubleValue();
+                        double tradingFee = TradingFeeRate * sought;
+                        myAcc.setBase(myAcc.getBase() - limitOrder.getOriginalAmount().doubleValue());
+                        myAcc.setCounter(myAcc.getCounter() - tradingFee + sought);
+                        totalTradingTimes += 1;
+                        sellTimes+=1;
+                        totalTradingFees += tradingFee;
+                        totalTradingAmount += sought;
+                        totalSell += limitOrder.getOriginalAmount().doubleValue();
+                        log.info("TaskSpotTrade LimitOrder:  sell {} {} at {}",
+                                String.format("%.3f", limitOrder.getOriginalAmount().doubleValue()),
+                                cp.base.toString(),
+                                String.format("%.3f", limitOrder.getLimitPrice().doubleValue()));
                     }
                 }
 
             }
-            getNetAssets();
+            tradingSummary();
         } else {
             log.info("from Task run: Not trade.");
         }

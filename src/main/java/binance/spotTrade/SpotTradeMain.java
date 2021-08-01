@@ -19,7 +19,7 @@ import java.util.concurrent.TimeUnit;
 
 public class SpotTradeMain {
     public static void main(String[] args) throws InterruptedException, IOException {
-        CurrencyPair cp = new CurrencyPair(Currency.BNB, Currency.USDT);
+        CurrencyPair cp = new CurrencyPair(Currency.ETH, Currency.USDT);
         ObjectMapper om = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
         BinanceExchange exchange = (BinanceExchange) BinanceDemoUtils.createExchange();
         ExchangeEntry exen = new ExchangeEntry(exchange);
@@ -42,11 +42,7 @@ public class SpotTradeMain {
         int spotTradeInterval = 1000;
         ScheduledExecutorService go = Executors.newScheduledThreadPool(1);
         go.scheduleWithFixedDelay(new TaskSpotTrade(exen, cp, 5), 10, spotTradeInterval, TimeUnit.MILLISECONDS);
-        Thread.sleep(240000);
-        go.shutdownNow();
-
-
-
-
+        //Thread.sleep(240000);
+        //go.shutdownNow();
     }
 }
